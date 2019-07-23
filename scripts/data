@@ -1,63 +1,158 @@
 #!/usr/bin/env python
-
+import argparse
 import configparser
 from datetime import datetime
 import os
 import sys
 import subprocess
 from typing import Optional
+'''
+This in-progress script will make SQL dumps of specified applications given
+an app config in a 'config.ini', which can live in the same directory at
+data or as specified by the DATA_CONFIG environment variable.
+
+python data -h will print usage instructions. A sample config.ini is also
+included as part of the repository.
+
+The only requirements beyond a Python recent enough to have typing declarations
+(ideally 3.6+) is a working OpenSSH configuration and utilities (i.e., the
+ssh command).
+'''
+
 
 class DataGetter:
-
+    """Class to manage fetching SQL dumps and data for configured
+    applications."""
     def __init__(self):
         self.get_config()
+        self.get_args()
 
-    def get_config(self) -> 'ConfigParser':
+    def get_config(self) -> 'configparser.ConfigParser':
         """Parse a file using Python's INI config syntax"""
         config_file = os.environ.get('DATA_CONFIG', 'config.ini')
         config = configparser.ConfigParser()
         config.read(config_file)
         self.config = config
 
-    def save_dump(self, app_conf: str) \
-            -> bool:
+    def get_args(self):
+        """Parse commandline arguments to the dump script."""
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--apps', type=str, nargs='+', default=list(),
+                            help='a subset of configured applications for data'
+                                 ' sync.')
+        self.args = parser.parse_args()
+
+    def check_configuration(self, app_name: str) -> Optional[bool]:
+        """Check configurations.
+
+            Returns:
+                True if the configuration is valid, otherwise None
+        """
+        app_conf = self.config[app_name] if app_name in self.config else None
+
+        if app_conf is None:
+            sys.stderr.write('Skipping app %s, no app config\n'
+                             % app_name)
+            return
+
+        host = app_conf.get('host', None)
+        db = app_conf.get('db', None)
+
+        if host is None or db is None:
+            sys.stderr.write('Missing config -- host: %s, database: %s\n'
+                             % (host, db))
+            return
+        self.current_conf = app_conf
+        return True
+
+    def clean_dumps(self, app_name: str) -> None:
+        """Clean old SQL dumps for an application."""
+        sys.stdout.write('Cleaning database dumps for %s.\n' % app_name)
+        if not self.check_configuration(app_name):
+            return
+        app_conf = self.current_conf
+
+        # expand shell vars and user dir, defaulting to cwd.
+        storage_dir = os.path.expanduser(
+            os.path.expandvars(app_conf.get('StorageDir', '.'))
+        )
+
+        dumps = os.listdir(storage_dir)
+        # filter by the name of the app as that is used to name the dumps
+        dumps[:] = [dump for dump in dumps if app_conf.get('db') in dump]
+        # sort by creation time in descending order
+        dumps.sort(key=os.path.getctime, reverse=True)
+        preserve_count = int(app_conf.get('preserveCount', 5))
+        for dump in dumps[preserve_count:]:
+            sys.stdout.write('Attempting to remove %s' % dump)
+            # TODO: error handling for failed delete? We may want this
+            # to simply fail in most cases if something is wrong with
+            # permissions.
+            os.remove(dump)
+
+    def save_dump(self, app_name: str) \
+            -> None:
         """Get an SQL dump from a host.
 
         Assumes that mysqldump is installed on remote host,
         and that an appropriate SSH config is installed locally.
         """
-        app_conf = self.config[app_conf]
+        # check for a valid configuration necessary to carry out basic tasks
+        if not self.check_configuration(app_name):
+            return
+
+        app_conf = self.current_conf
+
+        user = app_conf.get('user', '')
         host = app_conf.get('host', None)
         db = app_conf.get('db', None)
-        user = app_conf.get('user', '')
 
-        if host is None or db is None:
-            sys.stderr.write('Config -- host: %s, database: %s' % (host, db))
-            return False
+        sys.stdout.write('Preparing to dump SQL for %s\n' % app_name)
 
         try:
+            # fetch the mysqldump over ssh
             result = subprocess.run(
-                ['ssh', ('%s@%s' % (user, host)).strip('@'), 'mysqldump', '--opt', '%s' % db],
+                ['ssh', ('%s@%s' % (user, host)).strip('@'), 'mysqldump',
+                 '--opt', '%s' % db],
                 check=True,
                 stdout=subprocess.PIPE
             )
         except subprocess.CalledProcessError as err:
-            sys.stderr.write('Error dumping SQL from %s: %s' \
-                % (host, err))
-            return False
+            sys.stderr.write('Error dumping SQL from %s: %s\n'
+                             % (host, err))
+            return
+        # once we have a successful command
+        # expand shell vars and user dir, defaulting to cwd.
         filename = '%s-%s.sql' \
             % (datetime.now().astimezone().strftime('%Y-%m-%d'), db)
-        # expand shell vars and user dir ~
         storage_dir = os.path.expanduser(
-            os.path.expandvars(app_conf.get('StorageDir', '.')
-            ))
+            os.path.expandvars(app_conf.get('StorageDir', '.'))
+        )
+        # attempt to write, write out error if fails.
+        sys.stdout.write('Writing SQL dump for %s' % app_name)
         try:
             file_path = os.path.join(storage_dir, filename)
             with open(file_path, 'wb') as dump:
                 dump.write(result.stdout)
         except IOError as err:
-            sys.stderr.write('Error dumping to')
-        return True
+            # Make an IOError non-blocking so that other applications have a
+            # chance to run.
+            # NOTE: Not sure if this is necessary
+            sys.stderr.write('Error dumping to %s: %s\n' % (file_path, err))
+            return
+
 
 if __name__ == '__main__':
     getter = DataGetter()
+
+    # if apps are specified on the commandline, only dump those
+    if getter.args.apps:
+        for app_name in getter.args.apps:
+            getter.save_dump(app_name)
+            getter.clean_dumps(app_name)
+    # otherwise, just use the keys in the config except for DEFAULT
+    for app_name in getter.config.keys():
+        if app_name != 'DEFAULT':
+            getter.save_dump(app_name)
+            getter.clean_dumps(app_name)
+
