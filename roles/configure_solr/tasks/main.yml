@@ -19,10 +19,18 @@
 
 - name: Update and configure Solr configset
   block:
-    - name: Copy Solr configset files to the appropriate server
-    # handled automatically by command below?
+    - name: Copy project Solr configset files for upload to zookeeper
+        # synchronize configset from deploy
+        - synchronize:
+            mode: pull
+            src: "{{ deploy }}/solr_conf"
+            dest: /tmp/{{ app_name }}_solr_conf
 
     - name: Update configset with zookeeper
+        command: "solr zk -upconfig -d /tmp/{{ app_name }}_solr_conf -n {{ solr_collection }} -z {{ zk_host }}"
+        args:
+            chdir: /opt/solr/bin
+        delegate_to: localhost
     # execute locally:
     # shell: 'solr zk -upconfig -d {{ config_dir }} -n {{ config_set }} -z {{ zk_host }}'
     # Does this mean we don't need to alter hosts or use `delegate_to`? As long as we have access to the zk boxes.
@@ -32,17 +40,31 @@
     #   execute "cd /opt/solr/bin && ./solr zk -upconfig -d #{File.join(release_path, "solr_configs", config_dir)} -n #{config_set} -z #{zk_host}"
     # end
 
-    - name: Create Solr collection if it doesn't already exist by running django solr_schema
-      django_manage:
-        command: "solr_schema --no-input"
-        app_path: "{{ deploy }}"
-        virtualenv: "{{ deploy }}/env"
+    - name: Get a list of current Solr collections
+      uri:
+        url: "{{ solr_url }}/admin/collections?action=LIST"
+      register: solr_collections_list
+
+    - name: Create Solr collection if it doesn't already exist
+      uri:
+        url: "{{ solr_url }}/admin/collections?action=CREATE&name={{ solr_collection }}&collection.configName={{ solr_collection }}"  # other opts
+        when:  "{{ solr_collection }} not in {{ solr_collections_list.collections }}"
 
     # def create_collection(collection, config_name, num_shards = 1, replication_factor = 1, shards_per_node = 1)
     #     execute "curl '#{solr_url}/admin/collections?action=CREATE&name=#{collection}&collection.configName=#{config_name}&numShards=#{num_shards}&replicationFactor=#{replication_factor}&maxShardsPerNode=#{shards_per_node}'"
     #   end
 
     - name: Reload the collection if not newly created
+        uri:
+          url: "{{ solr_url }}/admin/collections?action=RELOAD&name={{ solr_collection }}"
+        when:  "{{ solr_collection }} in {{ solr_collections_list.collections }}"
+
+    - name: Apply any managed schema changes by running django solr_schema
+      django_manage:
+        command: "solr_schema --no-input"
+        app_path: "{{ deploy }}"
+        virtualenv: "{{ deploy }}/env"
+        when:  "{{ solr_collection }} not in {{ solr_collections_list.collections }}"
 
     # reload_collection(collection)
     # def reload_collection(collection)
