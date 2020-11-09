@@ -12,3 +12,6 @@ install_base: '/srv/www/qa'
 qa: qa
 # allow any deploy contexts
 deploy_contexts: []
+
+# Zookeeper hosts for Solr Cloud
+zk_host: 'lib-zk-staging1:2181,lib-zk-staging2:2181,lib-zk-staging3:2181/solr8'
