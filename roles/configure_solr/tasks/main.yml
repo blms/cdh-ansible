@@ -2,20 +2,12 @@
 # Get the repo's Solr configset synced with PUL's infrastructure.
 ##
 
-## TODO
-# - Alter hosts
-# - Get ansible onto different machine.
-
-## VARIABLES
-# config_dir = { deploy } / solr_conf_dir ? Or local path ?
-# zk_host: "lib-zk1:2181,lib-zk2:2181,lib-zk3:2181/solr8"
-    # first host is "leader of ensemble". We can list all or just the first, either way they'll all sync.
-# solr_url: ENV['SOLR_URL'] ||= 'http://localhost:8983/solr'
-# collection
-# release_path
-
 ## DOCUMENTATION
 # https://lucene.apache.org/solr/guide/8_1/using-zookeeper-to-manage-configuration-files.html
+
+## TODO
+# - Alter hosts
+# - define solr_url
 
 - name: Update and configure Solr configset
   block:
@@ -31,14 +23,6 @@
         args:
             chdir: /opt/solr/bin
         delegate_to: localhost
-    # execute locally:
-    # shell: 'solr zk -upconfig -d {{ config_dir }} -n {{ config_set }} -z {{ zk_host }}'
-    # Does this mean we don't need to alter hosts or use `delegate_to`? As long as we have access to the zk boxes.
-
-    # update_configset(config_dir: key, config_set: val)
-    # def update_configset(config_dir:, config_set:)
-    #   execute "cd /opt/solr/bin && ./solr zk -upconfig -d #{File.join(release_path, "solr_configs", config_dir)} -n #{config_set} -z #{zk_host}"
-    # end
 
     - name: Get a list of current Solr collections
       uri:
@@ -49,10 +33,6 @@
       uri:
         url: "{{ solr_url }}/admin/collections?action=CREATE&name={{ solr_collection }}&collection.configName={{ solr_collection }}"  # other opts
         when:  "{{ solr_collection }} not in {{ solr_collections_list.collections }}"
-
-    # def create_collection(collection, config_name, num_shards = 1, replication_factor = 1, shards_per_node = 1)
-    #     execute "curl '#{solr_url}/admin/collections?action=CREATE&name=#{collection}&collection.configName=#{config_name}&numShards=#{num_shards}&replicationFactor=#{replication_factor}&maxShardsPerNode=#{shards_per_node}'"
-    #   end
 
     - name: Reload the collection if not newly created
         uri:
@@ -66,16 +46,5 @@
         virtualenv: "{{ deploy }}/env"
         when:  "{{ solr_collection }} not in {{ solr_collections_list.collections }}"
 
-    # reload_collection(collection)
-    # def reload_collection(collection)
-    #   execute "curl '#{solr_url}/admin/collections?action=RELOAD&name=#{collection}'"
-    # end
-
   rescue:
       - include_tasks: roles/create_deployment/tasks/fail.yml
-
-
-# Probably used only when necessary.
-# def upload_configset(config_dir:, config_set:)
-  #   execute "(cd #{File.join(release_path, config_dir)} && zip -r - *) | curl -X POST --header 'Content-Type:application/octet-stream' --data-binary @- '#{solr_url}/admin/configs?action=UPLOAD&name=#{config_set}'"
-# end
