@@ -99,6 +99,9 @@ cdh-geniza1.princeton.edu
 geniza_qa
 geniza_prod
 
+[solr_cloud]
+lib-solr-staging1.princeton.edu
+
 ### staging, prod, and qa stanzas to create shared groups
 [staging:children]
 winthrop_staging

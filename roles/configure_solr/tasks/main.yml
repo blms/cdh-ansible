@@ -6,7 +6,6 @@
 # https://lucene.apache.org/solr/guide/8_1/using-zookeeper-to-manage-configuration-files.html
 
 ## TODO
-# - Alter hosts
 # - define solr_url
 
 - name: Update and configure Solr configset
@@ -16,13 +15,14 @@
         - synchronize:
             mode: pull
             src: "{{ deploy }}/solr_conf"
-            dest: /tmp/{{ app_name }}_solr_conf
+            dest: "/solr/cdh_solr/cdh_{{ app_name }}_solr_conf"
+        delegate_to: solr_cloud
 
     - name: Update configset with zookeeper
-        command: "solr zk -upconfig -d /tmp/{{ app_name }}_solr_conf -n {{ solr_collection }} -z {{ zk_host }}"
+        command: "solr zk -upconfig -d /solr/cdh_solr/cdh_{{ app_name }}_solr_conf -n {{ solr_collection }} -z {{ zk_host }}"
         args:
             chdir: /opt/solr/bin
-        delegate_to: localhost
+        delegate_to: solr_cloud
 
     - name: Get a list of current Solr collections
       uri:
