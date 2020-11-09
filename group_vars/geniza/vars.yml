@@ -15,7 +15,7 @@ app_name: geniza
 # apache symlink
 symlink: "{{ app_name }}"
 # Solr settings
-solr_collection: geniza
+solr_collection: cdh-geniza
 # apache location
 apache_app_path: "/var/www/{{ app_name }}"
 # wsgi file relative to apache location
